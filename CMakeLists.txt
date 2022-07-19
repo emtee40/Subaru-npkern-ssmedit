@@ -92,6 +92,7 @@ add_executable(npk_SH7055_18 ${NISSAN_SRCS} platf_7055.c pl_flash_705x_180nm.c)
 add_executable(npk_SH7058 ${NISSAN_SRCS} platf_7055.c pl_flash_705x_180nm.c)
 add_executable(ssmk_SH7058 ${SUBARU_SRCS} platf_7055.c pl_flash_705x_180nm.c)
 add_executable(ssmk_SH7055_18 ${SUBARU_SRCS} platf_7055.c pl_flash_705x_180nm.c)
+add_executable(ssmk_SH7055_02fxt_18 ${SUBARU_SRCS} platf_7055.c pl_flash_705x_180nm.c)
 
 
 # Select proper linker script
@@ -101,6 +102,7 @@ target_link_options(npk_SH7055_18 PRIVATE -T ${CMAKE_SOURCE_DIR}/ldscripts/lkr_7
 target_link_options(npk_SH7058 PRIVATE -T ${CMAKE_SOURCE_DIR}/ldscripts/lkr_7055_7058.ld)
 target_link_options(ssmk_SH7058 PRIVATE -T ${CMAKE_SOURCE_DIR}/ldscripts/lkr_subaru_7058.ld)
 target_link_options(ssmk_SH7055_18 PRIVATE -T ${CMAKE_SOURCE_DIR}/ldscripts/lkr_subaru_7055_18.ld)
+target_link_options(ssmk_SH7055_02fxt_18 PRIVATE -T ${CMAKE_SOURCE_DIR}/ldscripts/lkr_subaru_7055_02fxt_18.ld)
 
 
 ## Add all Nissan targets here
@@ -114,3 +116,4 @@ endforeach()
 
 add_kernel(ssmk SH7058)
 add_kernel(ssmk SH7055_18)
+add_kernel(ssmk SH7055_02fxt_18)
