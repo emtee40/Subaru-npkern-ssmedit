@@ -120,6 +120,34 @@
 		0x00080000,	/* end delimiter */
 	};
 
+#elif defined(SH7055_02fxt_18)
+	#define FTDAR_ERASE 0x04
+	#define FTDAR_WRITE 0x05
+	#define FL_ERASE_BASE	0xFFFF8000
+	#define FL_WRITE_BASE	0xFFFF8800
+	
+	#define FL_MAXROM	(512*1024UL - 1UL)
+
+	const u32 fblocks[] = {
+		0x00000000,
+		0x00001000,
+		0x00002000,
+		0x00003000,
+		0x00004000,
+		0x00005000,
+		0x00006000,
+		0x00007000,
+		0x00008000,
+		0x00010000,
+		0x00020000,
+		0x00030000,
+		0x00040000,
+		0x00050000,
+		0x00060000,
+		0x00070000,
+		0x00080000,	/* end delimiter */
+	};
+	
 #else
 	#error No target specified !
 
