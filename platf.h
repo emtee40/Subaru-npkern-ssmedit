@@ -80,14 +80,23 @@
 	#endif
 
 #elif defined(ssmk)
-	#define WDT_MAXCNT 4125 //aim for 6.6ms , although it probably works at 2ms anyway
+
 	#if defined(SH7058)
+		#define WDT_MAXCNT 4125 //aim for 6.6ms , although it probably works at 2ms anyway
 		#include "reg_defines/7055_7058_180nm.h"
 		#define RAM_MIN	0xFFFF0000
 		#define RAM_MAX 	0xFFFFBFFF
 		#define NPK_SCI SCI2
 
 	#elif defined(SH7055_18)
+		#define WDT_MAXCNT 4125 //aim for 6.6ms , although it probably works at 2ms anyway
+		#include "reg_defines/7055_7058_180nm.h"
+		#define RAM_MIN	0xFFFF6000
+		#define RAM_MAX	0xFFFFDFFF
+		#define NPK_SCI SCI2
+	
+	#elif defined(SH7055_02fxt_18)
+		#define WDT_MAXCNT 2060 //aim for 3.3ms 
 		#include "reg_defines/7055_7058_180nm.h"
 		#define RAM_MIN	0xFFFF6000
 		#define RAM_MAX	0xFFFFDFFF
