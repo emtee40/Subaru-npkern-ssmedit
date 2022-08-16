@@ -744,3 +744,409 @@ void cmd_loop(void) {
 
 	die();
 }
+
+
+static u8 flashbuffer[128], counter8byteblock;
+static u32 counter128byteblock, flashaddr, num128byteblocks;
+
+static void can_idle(unsigned us) {
+	u32 t0, tc, intv;
+
+	intv = MCLK_GETTS(us) / 1000;	//# of ticks for delay
+
+	t0 = get_mclk_ts();
+	while (1) {
+		tc = get_mclk_ts();
+		if ((tc - t0) >= intv) return;
+
+	}
+}
+
+
+ /* receives 8 bytes from CAN Channel 0 mailbox 0 into msg
+  *
+  * returns 0 if no data to receive
+  * returns 1 if success
+  * returns -1 if no unread message available
+  */
+ static int can_rx8bytes(u8 *msg) {
+	
+	if(!NPK_CAN.RXPR0.BIT.MB0) return 0;
+	
+	if(!NPK_CAN.UMSR0.BIT.MB0) {
+		
+		NPK_CAN.RXPR0.BIT.MB0 = 1;
+		memcpy(msg, (void *) &NPK_CAN.MB[0].MSG_DATA[0], 8);
+		return 1;
+
+	}
+
+	NPK_CAN.UMSR0.BIT.MB0 = 1;
+	return -1;
+	
+ }
+ 
+ 
+ /* transmits 8 bytes from buf via CAN Channel 0 mailbox 1
+  *
+  * 
+  * 
+  * 
+  */
+ static void can_tx8bytes(const u8 *buf) {
+	
+	while (NPK_CAN.TXPR0.BIT.MB1) { };
+	
+	NPK_CAN.TXACK0.BIT.MB1 = 1;
+	memcpy((void *) &NPK_CAN.MB[1].MSG_DATA[0], buf, 8);
+	NPK_CAN.TXPR0.BIT.MB1 = 1;
+	
+	return;
+	
+ }
+
+
+/* flash initialisation, 0xE0 command, called from cmd_loop
+ * 
+ * 
+ * 
+ *
+ */
+static void can_cmd_flash_init(u8 *msg) {
+	
+	u8 errval;
+
+	if ((msg[1] & 0x07) != 1) {
+		memcpy(txbuf, msg, 8);
+		txbuf[0] = 0x7F;
+		txbuf[1] = (msg[1] & 0xF8) | 0x01;
+		txbuf[2] = 0x30;  // general format error
+		can_tx8bytes(txbuf);
+		return;
+	}
+
+	if (!platf_flash_init(&errval)) {
+		memcpy(txbuf, msg, 8);
+		txbuf[0] = 0x7F;
+		txbuf[1] = (msg[1] & 0xF8) | 0x01;
+		txbuf[2] = errval;
+		can_tx8bytes(txbuf);
+		return;
+	}
+
+	if (msg[2] == 0xA5) platf_flash_unprotect();
+
+	txbuf[0] = 0x7A;
+	txbuf[1] = (msg[1] & 0xF8) | 0x00;
+	can_tx8bytes(txbuf);
+
+	//flashstate = FL_READY;
+	
+	return;
+
+}
+
+
+/* erase flash block, 0xF0 command, called from cmd_loop
+ * 
+ * 
+ * 
+ *
+ */
+ static void can_cmd_erase_block(u8 *msg) {
+	 
+	u32 rv;
+	
+	if ((msg[1] & 0x07) != 6) {
+		memcpy(txbuf, msg, 8);
+		txbuf[0] = 0x7F;
+		txbuf[1] = (msg[1] & 0xF8) | 0x01;
+		txbuf[2] = 0x30;  // general format error
+		can_tx8bytes(txbuf);
+		return;
+	}
+
+	memcpy(txbuf, msg, 8);
+	flashaddr = ((msg[3] << 24) | (msg[4] << 16) | (msg[5] << 8) | 0x00);
+	num128byteblocks = ((msg[6] << 8) | msg[7]);
+	counter8byteblock = 0;
+	counter128byteblock = 0;
+	
+	rv = platf_flash_eb(msg[2]);
+
+	if(rv) {
+		txbuf[0] = 0x7F;
+		txbuf[1] = (msg[1] & 0xF8) | 0x01;
+		txbuf[2] = rv;
+		can_tx8bytes(txbuf);
+		return;
+	}
+
+	txbuf[0] = msg[0];
+	txbuf[1] = (msg[1] & 0xF8) | 0x00;
+	can_tx8bytes(txbuf);
+	
+	return;
+	 
+}
+ 
+/* load 8 bytes for flashing, no command code (all bytes are data), called from cmd_loop
+ * 
+ * 
+ * 
+ *
+ */
+ static void can_cmd_load8bytes(u8 *msg) {
+
+ 	u8 i;
+	
+	// this is probably faster than memcpy
+	for (i = 0; i < 8; i++) flashbuffer[(8 * counter8byteblock) + i] = msg[i];
+	
+ }
+
+/* write flash block, 0xF8 command, called from cmd_loop
+ * 
+ * 
+ * 
+ *
+ */
+ static void can_cmd_flash_128bytes(u8 *msg) {
+
+	u32 i, rv, addr, flashCheckSum;
+
+	if((msg[1] & 0x07) != 3) {
+		memcpy(txbuf, msg, 8);
+		txbuf[0] = 0x7F;
+		txbuf[1] = (msg[1] & 0xF8) | 0x01;
+		txbuf[2] = 0x30;  // general format error
+		can_tx8bytes(txbuf);
+		return;
+	}
+	
+	memcpy(txbuf, msg, 8);
+
+	flashCheckSum = 0;
+
+	for (i = 0; i < 128; i++) {
+		flashCheckSum += flashbuffer[i];
+		flashCheckSum = ((flashCheckSum >> 8) & 0xFF) + (flashCheckSum & 0xFF);
+	}
+		
+	if (flashCheckSum != msg[4]) {
+		txbuf[0] = 0x7F;
+		txbuf[1] = (msg[1] & 0xF8) | 0x02;
+		txbuf[2] = 0x31;  // checksum error
+		txbuf[3] = flashCheckSum;
+		can_tx8bytes(txbuf);
+		return;	
+	}
+	
+	if (counter128byteblock != (u32) ((msg[2] << 8) | msg[3])) {
+		txbuf[0] = 0x7F;
+		txbuf[1] = (msg[1] & 0xF8) | 0x05;
+		txbuf[2] = 0x32;  // block number error
+		txbuf[3] = (counter128byteblock >> 8) & 0xFF;
+		txbuf[4] = counter128byteblock & 0xFF;
+		txbuf[5] = (num128byteblocks >> 8) & 0xFF;
+		txbuf[6] = num128byteblocks & 0xFF;
+		can_tx8bytes(txbuf);
+		return;	
+	}
+
+	addr = flashaddr + (128 * counter128byteblock);
+
+	rv = platf_flash_wb(addr, (u32) flashbuffer, 128);
+
+	if(rv) {
+		memcpy(txbuf, msg, 8);
+		txbuf[0] = 0x7F;
+		txbuf[1] = (msg[1] & 0xF8) | 0x01;
+		txbuf[2] = rv; 
+		can_tx8bytes(txbuf);
+		return;
+	}
+		
+	txbuf[0] = 0x7A;
+	txbuf[1] = (msg[1] & 0xF8) | 0x00;
+	can_tx8bytes(txbuf);
+		
+	return;
+	
+}	
+ 
+
+/* checksum command processor, 0xD0 command, called from cmd_loop.
+ * args[0,1] : 0x7A and SID
+ * args[2,3,4] : # of 256-byte blocks (modelled on Denso CAN method that has a max of 6 data bytes per 8 byte packet)
+ * args[5,6,7] : (starting address / 256)
+ *
+ * 
+ *
+ */
+ static void can_cmd_cks(u8 *msg) {
+	
+	u32 len, cks;
+	u8 *addr;
+			
+	if((msg[1] & 0x07) != 6) {
+		memcpy(txbuf, msg, 8);
+		txbuf[0] = 0x7F;
+		txbuf[1] = (msg[1] & 0xF8) | 0x01;
+		txbuf[2] = 0x30;  // general format error
+		can_tx8bytes(txbuf);
+		return;
+	}
+	
+	len = ((msg[2] << 24) | (msg[3] << 16) | (msg[4] << 8) | 0x00);
+	addr = (u8 *) ((msg[5] << 24) | (msg[6] << 16) | (msg[7] << 8) | 0x00);	
+	
+	cks = 0;
+	while (len) {
+		cks += (*addr & 0xFF);
+		cks = ((cks >> 8) & 0xFF) + (cks & 0xFF);
+		len--;
+		addr++;
+	}
+
+	txbuf[0] = 0x7A;
+	txbuf[1] = (msg[1] & 0xF8) | 0x01;
+	txbuf[2] = cks & 0xFF;
+	can_tx8bytes(txbuf);
+
+	return;
+
+ }
+ 
+ 
+/* dump command processor, 0xD8 command, called from cmd_loop.
+ * args[0,1] : 0x7A and SID
+ * args[2,3,4] : # of 256-byte blocks 
+ * args[5,6,7] : (starting address / 256)
+ * based on limitation of 6 data bytes per 8 byte packet
+ * ex.: "7A D6 00 10 00 00 00 00" dumps 1MB of ROM@ 0x0
+ *
+ */
+ static void can_cmd_dump(u8 *msg) {
+	
+	u32 addr, len;
+			
+	if((msg[1] & 0x07) != 6) {
+		memcpy(txbuf, msg, 8);
+		txbuf[0] = 0x7F;
+		txbuf[1] = (msg[1] & 0xF8) | 0x01;
+		txbuf[2] = 0x30;  // general format error
+		can_tx8bytes(txbuf);
+		return;
+	}
+	
+	len = ((msg[2] << 24) | (msg[3] << 16) | (msg[4] << 8) | 0x00);
+	addr = ((msg[5] << 24) | (msg[6] << 16) | (msg[7] << 8) | 0x00);	
+	
+	txbuf[0] = 0x7A;
+
+	while (len) {
+		u32 pktlen;
+		pktlen = len;
+		if (pktlen > 6) pktlen = 6;
+		txbuf[1] = (msg[1] & 0xF8) | pktlen;
+		memcpy(&txbuf[2], (void *) addr, pktlen);
+		can_tx8bytes(txbuf);
+		len -= pktlen;
+		addr += pktlen;
+		can_idle(750);
+	}
+	
+	return;
+
+ }
+ 
+ 
+void can_cmd_loop(void) {
+
+	u8 cmd;
+	static u8 currentmsg[8];
+	bool loadingblocks = false;
+	counter8byteblock = 0;
+	
+	while (1) {
+			
+		if(!can_rx8bytes(currentmsg)) continue;
+
+		if (loadingblocks) {
+				
+			can_cmd_load8bytes(currentmsg);
+			counter8byteblock++;
+			if (counter8byteblock > 15) {
+
+				counter8byteblock = 0;
+				loadingblocks = false;
+			}
+				
+		}
+		else if(currentmsg[0] == 0x7A) {
+				
+			cmd = currentmsg[1] & 0xF8;
+				
+			switch(cmd) {
+					
+				case 0xD0 :
+					can_cmd_cks(currentmsg);
+					break;
+					
+				case 0xD8 :
+					can_cmd_dump(currentmsg);
+					break;
+					
+				case 0xE0 :
+					PFC.PDIOR.WORD |= 0x0100;
+					can_cmd_flash_init(currentmsg);
+					break;
+
+				case 0xF0 :
+					can_cmd_erase_block(currentmsg);
+					loadingblocks = true;
+					break;
+
+				case 0xF8 :
+					can_cmd_flash_128bytes(currentmsg);
+					counter128byteblock++;
+					if (counter128byteblock < num128byteblocks) loadingblocks = true;
+					break;
+
+				default:
+					txbuf[0] = 0x7F;
+					txbuf[1] = (currentmsg[1] & 0xF8) | 0x01;
+					txbuf[2] = 0x34;   // unrecognised 0x7A command
+					can_tx8bytes(txbuf);
+					break;
+						
+			}
+				
+		}
+		else {
+			
+			if ((currentmsg[0] == 0xFF) && (currentmsg[1] == 0xC8)) {
+				
+				txbuf[0] = 0xFF;
+				txbuf[1] = 0xC8;
+				can_tx8bytes(txbuf);
+				die();
+				
+			}
+			
+			txbuf[0] = 0x7F;
+			txbuf[1] = (currentmsg[1] & 0xF8) | 0x01;
+			txbuf[2] = 0x35;    // unrecognised command (non 0x7A)
+			can_tx8bytes(txbuf);
+				
+		}
+			
+	}
+	
+	die();
+	
+	return;
+	
+}	
+	
