@@ -15,6 +15,8 @@
 
 
 void init_mfg(void) {
+	PFC.PDIOR.BIT.B8 = 1;  //required for 7055 02_fxt 350nm, has no effect on 7058
+	
 	wdt_dr = &PB.DR.WORD;  //manually assign these values, not elegant but will do for now
 	wdt_pin = 0x8000;
 
