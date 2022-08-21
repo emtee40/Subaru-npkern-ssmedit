@@ -1044,13 +1044,17 @@ static void can_cmd_flash_init(u8 *msg) {
 	addr = ((msg[5] << 24) | (msg[6] << 16) | (msg[7] << 8) | 0x00);	
 	
 	txbuf[0] = 0x7A;
+	txbuf[1] = (msg[1] & 0xF8); 
+	can_tx8bytes(txbuf);
+	can_idle(750);
 
 	while (len) {
 		u32 pktlen;
 		pktlen = len;
-		if (pktlen > 6) pktlen = 6;
-		txbuf[1] = (msg[1] & 0xF8) | pktlen;
-		memcpy(&txbuf[2], (void *) addr, pktlen);
+		if (pktlen > 8) pktlen = 8;
+		//txbuf[1] = (msg[1] & 0xF8) | pktlen;
+		//memcpy(&txbuf[2], (void *) addr, pktlen);
+		memcpy(txbuf, (void *) addr, pktlen);
 		can_tx8bytes(txbuf);
 		len -= pktlen;
 		addr += pktlen;
