@@ -775,13 +775,14 @@ static void can_idle(unsigned us) {
 	
 	if(!NPK_CAN.UMSR0.BIT.MB0) {
 		
-		NPK_CAN.RXPR0.BIT.MB0 = 1;
 		memcpy(msg, (void *) &NPK_CAN.MB[0].MSG_DATA[0], 8);
+		NPK_CAN.RXPR0.WORD = 1;
 		return 1;
 
 	}
 
-	NPK_CAN.UMSR0.BIT.MB0 = 1;
+	NPK_CAN.UMSR0.WORD = 1;
+	NPK_CAN.RXPR0.WORD = 1;
 	return -1;
 	
  }
@@ -797,9 +798,9 @@ static void can_idle(unsigned us) {
 	
 	while (NPK_CAN.TXPR0.BIT.MB1) { };
 	
-	NPK_CAN.TXACK0.BIT.MB1 = 1;
+	NPK_CAN.TXACK0.WORD = 2;
 	memcpy((void *) &NPK_CAN.MB[1].MSG_DATA[0], buf, 8);
-	NPK_CAN.TXPR0.BIT.MB1 = 1;
+	NPK_CAN.TXPR0.WORD = 2;
 	
 	return;
 	
@@ -1058,7 +1059,7 @@ static void can_cmd_flash_init(u8 *msg) {
 		can_tx8bytes(txbuf);
 		len -= pktlen;
 		addr += pktlen;
-		can_idle(750);
+		//can_idle(750);
 	}
 	
 	return;
@@ -1075,7 +1076,16 @@ void can_cmd_loop(void) {
 	
 	while (1) {
 			
-		if(!can_rx8bytes(currentmsg)) continue;
+		int rv = can_rx8bytes(currentmsg);
+		if(rv == 0) continue;
+		
+		if(rv == -1) {
+			txbuf[0] = 0x7F;
+			txbuf[1] = (currentmsg[1] & 0xF8) | 0x01;
+			txbuf[2] = 0x36;   // unread message error
+			can_tx8bytes(txbuf);
+			continue;
+		}
 
 		if (loadingblocks) {
 				
