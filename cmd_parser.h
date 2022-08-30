@@ -22,3 +22,5 @@
 void cmd_init(u8 brrdiv);
 
 void cmd_loop(void);
+
+void can_cmd_loop(void);
