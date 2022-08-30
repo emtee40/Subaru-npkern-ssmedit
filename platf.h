@@ -93,12 +93,26 @@
 		#define RAM_MAX	0xFFFFDFFF
 		#define NPK_SCI SCI2
 	
+	#elif defined(SH7055_02fxt_18)
+		#define WDT_MAXCNT 2060 //aim for 3.3ms 
+		#include "reg_defines/7055_7058_180nm.h"
+		#define RAM_MIN	0xFFFF6000
+		#define RAM_MAX	0xFFFFDFFF
+		#define NPK_SCI SCI2
+
+	#elif defined(SH7055_02fxt_35)
+		#define WDT_MAXCNT 2060 //aim for 3.3ms 
+		#include "reg_defines/7055_350nm.h"
+		#define RAM_MIN	0xFFFF6000
+		#define RAM_MAX	0xFFFFDFFF
+		#define NPK_SCI SCI2
+
 	#else
 		#error invalid target for ssmk
 	#endif
 #endif
 
-
+#define NPK_CAN HCAN0
 
 #define MCLK_GETMS(x) ((x) * 16 / 10000)	/* convert ticks to milliseconds */
 #define MCLK_GETTS(x) ((x) * 10000 / 16) /* convert millisec to ticks */
