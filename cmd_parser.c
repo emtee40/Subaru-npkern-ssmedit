@@ -284,6 +284,264 @@ static void cmd_startcomm(void) {
 	flashstate = FL_IDLE;
 }
 
+#define EEP_COMMS4
+#define EEP_START_BIT     0x04000000
+#define EEP_READ          0x02000000
+#define EEP_WRITE_ENABLE  0x00C00000
+#define EEP_WRITE         0x01000000
+#define EEP_WRITE_DISABLE 0x00000000
+
+
+void __attribute__ ((noinline)) delay(int mult) {
+	asm("mov #0x0,r5");  
+	asm("shll2 %0"::"r"(mult):"r5");
+	asm("shll r4");
+	asm("cmp/hs r4,r5");
+	asm("bt 1f");
+	asm("0:");
+	asm("add #0x1,r5");
+	asm("cmp/hs r4,r5");
+	asm("bf 0b");
+	asm("1:");
+}
+
+
+bool __attribute__ ((noinline)) EEPROM_check(void) {
+
+	bool pbpin;
+
+#if defined(EEP_COMMS4)
+	//Toggle PF10 & short delay	
+	PF.DR.WORD |= 0x0400;                                  // PF10 (gen I/O) on - looks like PF10 is connected to EEPROM CS
+	delay(2);
+	pbpin = ((PB.DR.WORD & 0x0800) == 0);                  // pbpin = 0 if PB11(RxD4) == 1 - maybe the 'dummy bit'
+	PF.DR.WORD &= ~0x0400;                                 // PF10 (gen I/O) off - CS off
+
+#elif defined(EEP_COMMS3)
+	//Toggle PJ2 & short delay	
+	PJ.DR.WORD |= 0x0004;                                  // PJ2 (gen I/O) on - looks like PJ2 is connected to EEPROM CS
+	delay(2);
+	pbpin = ((PB.DR.WORD & 0x0200) == 0);                  // pbpin = 0 if PB9(RxD4) == 1 - maybe the 'dummy bit'
+	PJ.DR.WORD &= ~0x0004;                                 // PJ2 (gen I/O) off - CS off
+
+#else
+	#error No target specified!
+#endif
+
+	return pbpin;
+
+
+
+}
+
+void __attribute__ ((noinline)) EEPROM_init(void) {
+
+#if defined(EEP_COMMS4)
+	// prepare for read
+	PFC.PLIR.WORD &= ~0x0200;                          // PL9 (SCK4) not inverted
+	PFC.PBCRH.WORD &= ~0x0030;                          // turn off PB10MD0 and PB10MD1 - set PB10 to general I/O
+	PB.DR.WORD &= ~0x0400;                             // turn off PB10 (general I/O)
+	PF.DR.WORD |= 0x0400;                              // turn on  PF10 (general I/O) - bring EEPROM CS high
+	PFC.PBCRH.WORD = (PFC.PBCRH.WORD & ~0x0030) | 0x0010; // turn off PB10MD0 and PB10MD1 - set PB10 to general I/O THEN set PB10 to TxD4
+
+#elif defined(EEP_COMMS3)
+	// prepare for read
+	PFC.PLIR.WORD &= ~0x0100;                          // PL8 (SCK3) not inverted
+	PFC.PBCRH.WORD &= ~0x0003;                          // turn off PB8MD0 and PB8MD1 - set PB8 to general I/O
+	PB.DR.WORD &= ~0x0100;                             // turn off PB8 (general I/O)
+	PJ.DR.WORD |= 0x0004;                              // turn on  PJ2 (general I/O) - bring EEPROM CS high
+	PFC.PBCRH.WORD = (PFC.PBCRH.WORD & ~0x0003) | 0x0001; // turn off PB8MD0 and PB8MD1 - set PB8 to general I/O THEN set PB8 to TxD3
+
+#else
+	#error No target specified!
+#endif
+
+	return;
+
+}
+
+void __attribute__ ((noinline)) EEPROM_send_cmd(uint32_t cmd, uint32_t len) {
+
+	uint8_t i, eeprom_cmd[4];
+	
+	eeprom_cmd[0] = (uint8_t) ((cmd >> 24) & 0xFF);
+	eeprom_cmd[1] = (uint8_t) ((cmd >> 16) & 0xFF);
+	eeprom_cmd[2] = (uint8_t) ((cmd >> 8) & 0xFF);
+	eeprom_cmd[3] = (uint8_t) (cmd & 0xFF);
+
+#if defined(EEP_COMMS4)
+	// TX len bytes - send command, 2 bytes for read, 4 bytes for write
+	SCI4.SCR.BYTE = (SCI4.SCR.BYTE & 0x0B) | 0x20;     // TXI, RXI, TX, RX, TEI disabled, internal clock/SCI pin used for sync clock output THEN TX enabled
+	for (i = 0; i < len; i++) {
+		while ((SCI4.SSR.BYTE & 0x80) == 0) {  };      // wait until TDR does not contain valid TX data (ie) it has gone to TSR
+		SCI4.TDR = eeprom_cmd[i];                      // set TDR
+		SCI4.SSR.BYTE = (SCI4.SSR.BYTE & 0x7F) | 0x78; // clear TDRE and ?? CPU cannot write 1 to the status flags ??  
+	}
+	while ((SCI4.SSR.BYTE & 0x04) == 0) {  };          // wait until transmission ended
+	SCI4.SCR.BYTE &= 0x0B;                             // TXI, RXI, TX, RX, TEI disabled, internal clock/SCI pin used for sync clock output
+
+#elif defined(EEP_COMMS3)
+	// TX len bytes - send command, 2 bytes for read, 4 bytes for write
+	SCI3.SCR.BYTE = (SCI3.SCR.BYTE & 0x0B) | 0x20;     // TXI, RXI, TX, RX, TEI disabled, internal clock/SCI pin used for sync clock output THEN TX enabled
+	for (i = 0; i < len; i++) {
+		while ((SCI3.SSR.BYTE & 0x80) == 0) {  };      // wait until TDR does not contain valid TX data (ie) it has gone to TSR
+		SCI3.TDR = eeprom_cmd[i];                      // set TDR
+		SCI3.SSR.BYTE = (SCI3.SSR.BYTE & 0x7F) | 0x78; // clear TDRE and ?? CPU cannot write 1 to the status flags ??  
+	}
+	while ((SCI3.SSR.BYTE & 0x04) == 0) {  };          // wait until transmission ended
+	SCI3.SCR.BYTE &= 0x0B;                             // TXI, RXI, TX, RX, TEI disabled, internal clock/SCI pin used for sync clock output
+
+#else
+	#error No target specified!
+#endif
+
+	return;
+
+}
+
+uint16_t __attribute__ ((noinline)) EEPROM_get_rsp(void) {
+
+	uint8_t i, eeprom_rsp[2];
+
+#if defined(EEP_COMMS4)
+	// RX 2 bytes
+	PFC.PLIR.WORD |= 0x0200;                           // PL9 (SCK4) inverted
+	SCI4.SCR.BYTE = (SCI4.SCR.BYTE & 0x0B) | 0x30;     // TXI, RXI, TX, RX, TEI disabled, internal clock/SCI pin used for sync clock output THEN TX, RX enabled
+	for (i = 0; i < 2; i++) {	
+		SCI4.TDR = 0x00;                               // set TDR
+		SCI4.SSR.BYTE = (SCI4.SSR.BYTE & 0x7F) | 0x78; // clear TDRE and ?? CPU cannot write 1 to the status flags ??
+		while ((SCI4.SSR.BYTE & 0x40) == 0) {  };      // wait until RDR contains valid received data
+		eeprom_rsp[i] = SCI4.RDR;                      // store RDR data
+		SCI4.SSR.BYTE = (SCI4.SSR.BYTE & 0xBF) | 0xB8; // clear RDRF and ?? CPU cannot write 1 to the status flags ??    
+	}
+	SCI4.SCR.BYTE &= 0x0B;                             // TXI, RXI, TX, RX, TEI disabled, internal clock/SCI pin used for sync clock output
+	PFC.PLIR.WORD &= ~0x0200;                          // PL9 (SCK4) not inverted
+
+#elif defined(EEP_COMMS3)
+	// RX 2 bytes
+	PFC.PLIR.WORD |= 0x0100;                           // PL8 (SCK3) inverted
+	SCI3.SCR.BYTE = (SCI3.SCR.BYTE & 0x0B) | 0x30;     // TXI, RXI, TX, RX, TEI disabled, internal clock/SCI pin used for sync clock output THEN TX, RX enabled
+	for (i = 0; i < 2; i++) {	
+		SCI3.TDR = 0x00;                               // set TDR
+		SCI3.SSR.BYTE = (SCI3.SSR.BYTE & 0x7F) | 0x78; // clear TDRE and ?? CPU cannot write 1 to the status flags ??
+		while ((SCI3.SSR.BYTE & 0x40) == 0) {  };      // wait until RDR contains valid received data
+		eeprom_rsp[i] = SCI3.RDR;                      // store RDR data
+		SCI3.SSR.BYTE = (SCI3.SSR.BYTE & 0xBF) | 0xB8; // clear RDRF and ?? CPU cannot write 1 to the status flags ??    
+	}
+	SCI3.SCR.BYTE &= 0x0B;                             // TXI, RXI, TX, RX, TEI disabled, internal clock/SCI pin used for sync clock output
+	PFC.PLIR.WORD &= ~0x0100;                          // PL8 (SCK3) not inverted
+
+#else
+	#error No target specified!
+#endif
+
+	return (uint16_t) ((eeprom_rsp[0] << 8) | eeprom_rsp[1]);
+
+}		
+
+uint16_t __attribute__ ((noinline)) EEPROM_TX_2bytes_RX_2bytes(uint32_t cmd) {	
+
+	uint16_t rsp;
+
+	EEPROM_init();
+	EEPROM_send_cmd(cmd, 2);
+	rsp = EEPROM_get_rsp();
+
+#if defined(EEP_COMMS4)
+	PF.DR.WORD &= ~0x0400;                             // PF10 (gen I/O) off  (EEPROM CS off)
+#elif defined(EEP_COMMS3)
+	PJ.DR.WORD &= ~0x0040;                             // PJ2 (gen I/O) off  (EEPROM CS off)
+#else
+	#error No target specified!
+#endif	
+	
+	return (uint16_t) rsp;
+
+}
+	
+void __attribute__ ((noinline)) EEPROM_TX_bytes(uint32_t cmd, uint8_t len) {	
+
+	EEPROM_init();
+	EEPROM_send_cmd(cmd, len);
+
+#if defined(EEP_COMMS4)
+	PF.DR.WORD &= ~0x0400;                             // PF10 (gen I/O) off  (EEPROM CS off)
+#elif defined(EEP_COMMS3)
+	PJ.DR.WORD &= ~0x0040;                             // PJ2 (gen I/O) off  (EEPROM CS off)
+#else
+	#error No target specified!
+#endif	
+	return;
+
+}
+
+static void __attribute__ ((noinline)) eep_read16_sub(uint8_t addr, uint16_t *dest) {
+	
+	uint8_t not_ready_counter;
+	uint32_t cmd;
+	
+	not_ready_counter = 0;
+	*dest = 0xFFFF;
+
+	while (not_ready_counter < 0xFE) {
+
+		if (EEPROM_check()) {
+			not_ready_counter++;
+		}
+		else {
+			cmd = (uint32_t) (EEP_START_BIT | EEP_READ | (addr << 16));
+			*dest = EEPROM_TX_2bytes_RX_2bytes(cmd);
+			return;
+		}
+	}
+	
+	return;
+
+}
+	
+static uint32_t __attribute__ ((noinline)) eep_write16_sub(uint8_t addr, uint8_t *data, uint8_t len) {
+	
+	uint8_t ecur, not_ready_counter;
+	uint32_t cmd;
+	
+	not_ready_counter = 0;
+	addr /= 2;	// modify address to fit with eeprom 256*16bit org 
+	len &= ~1;	// align to 16bits 
+
+	while (not_ready_counter < 0xFE) {
+
+		if(EEPROM_check()) {
+			not_ready_counter++;
+		}
+		else {
+			for (ecur = 0; ecur < (len / 2); ecur++) {
+				cmd = (uint32_t) (EEP_START_BIT | EEP_WRITE_ENABLE);   // perhaps this could be outside the loop
+				EEPROM_TX_bytes(cmd, 2);
+
+				cmd = (uint32_t) (EEP_START_BIT | EEP_WRITE);
+				cmd	|= (uint32_t) (addr << 16);
+				cmd |= (uint32_t) (data[ecur * 2] << 8);
+				cmd |= (uint32_t) (data[(ecur * 2) + 1]);
+				EEPROM_TX_bytes(cmd, 4);
+
+				delay(7000);  // allow time for write (5ms)
+				addr++;
+			}
+			
+			cmd = (uint32_t) (EEP_START_BIT | EEP_WRITE_DISABLE);
+			EEPROM_TX_bytes(cmd, 2);
+			
+			return 0;
+		
+		}
+		
+	}
+	
+	return 1;
+	
+}
+
+
 /* dump command processor, called from cmd_loop.
  * args[0] : address space (0: EEPROM, 1: ROM)
  * args[1,2] : # of 32-byte blocks
@@ -311,6 +569,33 @@ static void cmd_dump(struct iso14230_msg *msg) {
 	len = 32 * ((args[1] << 8) | args[2]);
 	addr = 32 * ((args[3] << 8) | args[4]);
 	switch (space) {
+	case SID_DUMP_SUB_EEPROM:
+		/* dump eeprom stuff */
+		addr /= 2;	/* modify address to fit with eeprom 256*16bit org */
+		len &= ~1;	/* align to 16bits */
+		while (len) {
+			uint16_t pbuf[17];
+			uint8_t *pstart;	//start of ISO packet
+			uint16_t *ebuf = &pbuf[1];	//cheat : form an ISO packet with the pos resp code in pbuf[0]
+
+			int pktlen;
+			int ecur;
+
+			pstart = (uint8_t *)(pbuf) + 1;
+			*pstart = SID_DUMP + 0x40;
+
+			pktlen = len;
+			if (pktlen > 32) pktlen = 32;
+
+			for (ecur = 0; ecur < (pktlen / 2); ecur += 1) {
+				eep_read16_sub((uint8_t) addr + ecur, (uint16_t *)&ebuf[ecur]);
+			}
+			iso_sendpkt(pstart, pktlen + 1);
+
+			len -= pktlen;
+			addr += (pktlen / 2);	//work in eeprom addresses
+		}
+		break;
 	case SID_DUMP_EEPROM:
 		/* dump eeprom stuff */
 		addr /= 2;	/* modify address to fit with eeprom 256*16bit org */
@@ -416,17 +701,38 @@ static void cmd_flash_utils(struct iso14230_msg *msg) {
 
 	u32 rv = ISO_NRC_GR;
 
-	if (flashstate != FL_READY) {
-		rv = ISO_NRC_CNCORSE;
-		goto exit_bad;
-	}
-
 	if (msg->datalen <= 1) {
 		rv = ISO_NRC_SFNS_IF;
 		goto exit_bad;
 	}
 
 	subcommand = msg->data[1];
+
+	if(subcommand == SIDFL_SUBEEP) {
+		//format : <SID_FLASH> <SIDFL_SUBEEP> <A2> <A1> <A0> <D0>...<D127> <CRC>
+		if (msg->datalen != (SIDFL_WB_DLEN + 6)) {
+			rv = ISO_NRC_SFNS_IF;
+			goto exit_bad;
+		}
+
+		if (cks_add8(&msg->data[2], (SIDFL_WB_DLEN + 3)) != msg->data[SIDFL_WB_DLEN + 5]) {
+			rv = SID_CONF_CKS1_BADCKS;	//crcerror
+			goto exit_bad;
+		}
+
+		tmp = (msg->data[2] << 16) | (msg->data[3] << 8) | msg->data[4];
+		rv = eep_write16_sub((uint8_t) tmp, (uint8_t *) &msg->data[5], SIDFL_WB_DLEN);
+		if (rv) {
+			rv = (rv & 0xFF) | 0x80;	//make sure it's a valid extented NRC
+			goto exit_bad;
+		}
+	goto exit_good;
+	}
+
+	if (flashstate != FL_READY) {
+		rv = ISO_NRC_CNCORSE;
+		goto exit_bad;
+	}
 
 	switch(subcommand) {
 	case SIDFL_EB:
@@ -479,6 +785,7 @@ static void cmd_flash_utils(struct iso14230_msg *msg) {
 		break;
 	}
 
+exit_good:
 	txbuf[0] = SID_FLASH + 0x40;
 	iso_sendpkt(txbuf, 1);	//positive resp
 	return;
