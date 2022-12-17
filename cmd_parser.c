@@ -771,7 +771,8 @@ static void can_idle(unsigned us) {
   */
  static int can_rx8bytes(u8 *msg) {
 	
-	if(!NPK_CAN.RXPR0.BIT.MB0) return 0;
+	 /* 7058 version */
+	 if(!NPK_CAN.RXPR0.BIT.MB0) return 0;
 	
 	if(!NPK_CAN.UMSR0.BIT.MB0) {
 		
@@ -784,7 +785,24 @@ static void can_idle(unsigned us) {
 	NPK_CAN.UMSR0.WORD = 1;
 	NPK_CAN.RXPR0.WORD = 1;
 	return -1;
+
+	/* 7055 350nm version ... 
+	if(!NPK_CAN.RXPR.BIT.MB0) return 0;
 	
+	if(!NPK_CAN.UMSR.BIT.MB0) {
+		
+		memcpy(msg, (void *) &NPK_CAN.MD[0][0], 8);
+		NPK_CAN.RXPR.WORD = 0x0100;
+		return 1;
+
+	}
+
+	NPK_CAN.UMSR.WORD = 0x0100;
+	NPK_CAN.RXPR.WORD = 0x0100;
+	return -1;
+	*/
+
+	 
  }
  
  
@@ -796,13 +814,24 @@ static void can_idle(unsigned us) {
   */
  static void can_tx8bytes(const u8 *buf) {
 	
-	while (NPK_CAN.TXPR0.BIT.MB1) { };
+	/* 7058 version */
+	 while (NPK_CAN.TXPR0.BIT.MB1) { };
 	
 	NPK_CAN.TXACK0.WORD = 2;
 	memcpy((void *) &NPK_CAN.MB[1].MSG_DATA[0], buf, 8);
 	NPK_CAN.TXPR0.WORD = 2;
 	
 	return;
+	
+	/* 7055 350nm version ... 
+	while (NPK_CAN.TXPR.BIT.MB1) { };
+	
+	NPK_CAN.TXACK.WORD = 0x0200;
+	memcpy((void *) &NPK_CAN.MD[1][0], buf, 8);
+	NPK_CAN.TXPR.WORD = 0x0200;
+	
+	return;	
+	 */
 	
  }
 
